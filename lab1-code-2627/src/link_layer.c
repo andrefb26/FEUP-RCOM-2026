@@ -5,17 +5,25 @@
 #include "link_layer.h"
 #include "serial_port.h"
 
+#include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 // MISC
 #define _POSIX_SOURCE 1 // POSIX compliant source
 #define BUF_SIZE 256
 
+#define FALSE 0
+#define TRUE 1
+
 #define FLAG  0x7E
 #define A_TX  0x03
 #define C_SET 0x03
 #define C_UA  0x07
+
+int alarmEnabled = FALSE;
+int alarmCount = 0;
 
 typedef enum { START, FLAG_RCV, A_RCV, C_RCV, BCC_OK, STOP } State;
 
@@ -61,6 +69,14 @@ void receiveFrame(unsigned char a, unsigned char c)
     }
 }
 
+void alarmHandler(int signal)
+{
+    alarmEnabled = FALSE;
+    alarmCount++;
+
+    printf("Alarm #%d received\n", alarmCount);
+}
+
 ////////////////////////////////////////////////
 // LLOPEN
 ////////////////////////////////////////////////
@@ -79,15 +95,38 @@ int llOpenTx(LinkLayer llParameters)
 
     printf("Serial port %s opened\n", llParameters.serialPort);
 
-    // Enviar SET
-    unsigned char set[5] = {FLAG, A_TX, C_SET, A_TX ^ C_SET, FLAG};
-    int bytes = writeBytesSerialPort(set, 5);
-    printf("SET enviado (%d bytes)\n", bytes);
+    
 
-    // Receber UA
-    receiveFrame(A_TX, C_UA);
-    printf("UA recebido corretamente. Ligação estabelecida\n");
+    printf("Alarm configured\n");
 
+    while (alarmCount < 4)
+    {
+        // Enviar SET
+        struct sigaction act = {0};
+        act.sa_handler = &alarmHandler;
+        if (sigaction(SIGALRM, &act, NULL) == -1)
+        {
+            perror("sigaction");
+            exit(1);
+        }
+        unsigned char set[5] = {FLAG, A_TX, C_SET, A_TX ^ C_SET, FLAG};
+        int bytes = writeBytesSerialPort(set, 5);
+        printf("SET enviado (%d bytes)\n", bytes);
+
+        // Receber UA
+        receiveFrame(A_TX, C_UA);
+        printf("UA recebido corretamente. Ligação estabelecida\n");
+        
+        
+        if (alarmEnabled == FALSE)
+        {
+            alarm(3); // Set alarm to be triggered in 3s
+            alarmEnabled = TRUE;
+            
+        }
+    }
+
+    
     // Close serial port
     if (closeSerialPort() < 0)
     {
