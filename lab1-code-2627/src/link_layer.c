@@ -28,13 +28,17 @@ int alarmCount = 0;
 typedef enum { START, FLAG_RCV, A_RCV, C_RCV, BCC_OK, STOP } State;
 
 // Lê bytes até receber uma trama [FLAG, A, C, A^C, FLAG] válida
-void receiveFrame(unsigned char a, unsigned char c)
+// Devolve 0 se recebeu a trama, -1 se o alarme disparou (só com useTimeout)
+int receiveFrame(unsigned char a, unsigned char c, int useTimeout)
 {
     State state = START;
     unsigned char byte;
 
     while (state != STOP)
     {
+        if (useTimeout && !alarmEnabled)
+            return -1;
+
         if (readByteSerialPort(&byte) != 1)
             continue;
 
@@ -67,6 +71,8 @@ void receiveFrame(unsigned char a, unsigned char c)
             break;
         }
     }
+
+    return 0;
 }
 
 void alarmHandler(int signal)
@@ -95,38 +101,43 @@ int llOpenTx(LinkLayer llParameters)
 
     printf("Serial port %s opened\n", llParameters.serialPort);
 
+    // Configurar
+    struct sigaction act = {0};
+    act.sa_handler = &alarmHandler;
+    if (sigaction(SIGALRM, &act, NULL) == -1)
+    {
+        perror("sigaction");
+        exit(1);
+    }
+    
+    unsigned char set[5] = {FLAG, A_TX, C_SET, A_TX ^ C_SET, FLAG};
+    alarmCount = 0;
+
+
     
 
-    printf("Alarm configured\n");
-
-    while (alarmCount < 4)
+    while (alarmCount <= llParameters.nRetransmissions)
     {
         // Enviar SET
-        struct sigaction act = {0};
-        act.sa_handler = &alarmHandler;
-        if (sigaction(SIGALRM, &act, NULL) == -1)
-        {
-            perror("sigaction");
-            exit(1);
-        }
-        unsigned char set[5] = {FLAG, A_TX, C_SET, A_TX ^ C_SET, FLAG};
         int bytes = writeBytesSerialPort(set, 5);
         printf("SET enviado (%d bytes)\n", bytes);
+        
+        alarm(llParameters.timeout); // Set alarm to be triggered after timeout
+        alarmEnabled = TRUE;
 
         // Receber UA
-        receiveFrame(A_TX, C_UA);
-        printf("UA recebido corretamente. Ligação estabelecida\n");
-        
-        
-        if (alarmEnabled == FALSE)
+        if (receiveFrame(A_TX, C_UA, TRUE) == 0)
         {
-            alarm(3); // Set alarm to be triggered in 3s
-            alarmEnabled = TRUE;
-            
+
+            alarm(0); // Cancel alarm
+            alarmEnabled = FALSE;
+            printf("UA recebido corretamente. Ligação estabelecida\n");
+            return 0;
         }
     }
 
-    
+    printf("Sem resposta após %d tentativas\n", alarmCount);
+
     // Close serial port
     if (closeSerialPort() < 0)
     {
@@ -136,7 +147,7 @@ int llOpenTx(LinkLayer llParameters)
 
     printf("Serial port %s closed\n", llParameters.serialPort);
 
-    return 0;
+    return -1;
 }
 
 int llOpenRx(LinkLayer llParameters)
@@ -155,7 +166,7 @@ int llOpenRx(LinkLayer llParameters)
     printf("Serial port %s opened\n", llParameters.serialPort);
 
     // Receber SET
-    receiveFrame(A_TX, C_SET);
+    receiveFrame(A_TX, C_SET, FALSE);
     printf("SET recebido corretamente\n");
 
     // Responder com UA
