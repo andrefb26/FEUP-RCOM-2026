@@ -204,7 +204,27 @@ int llSend(const unsigned char *buf, int bufSize)
 ////////////////////////////////////////////////
 int llReceive(unsigned char *packet)
 {
-    // TODO: Implement this function
+    /*contador = 0
+estado = START
+
+enquanto não terminar:
+    ler 1 byte da porta série
+
+    estados START → FLAG_RCV → A_RCV → C_RCV → BCC_OK   (como no receiveFrame)
+
+    no estado DADOS:
+        se byte == FLAG:
+            → acabou! a trama está toda no array
+        senão:
+            packet[contador] = byte
+            contador++
+
+(depois de acabar)
+o último byte guardado é o BCC2, não é dado → tamanho = contador - 1
+verificar o BCC2 (ver ponto 2 em baixo)
+se estiver certo → enviar RR, return tamanho
+se estiver errado → enviar REJ, voltar a esperar
+*/
 
     return 0;
 }
